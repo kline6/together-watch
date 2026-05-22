@@ -1,0 +1,9 @@
+[36mvite v5.4.21 [32mbuilding for production...[36m[39m
+transforming...
+[32m✓[39m 77 modules transformed.
+rendering chunks...
+computing gzip size...
+[2mdist/[22m[32mindex.html                 [39m[1m[2m  0.58 kB[22m[1m[22m[2m │ gzip:  0.44 kB[22m
+[2mdist/[22m[35massets/index-kYKJzy3D.css  [39m[1m[2m 14.65 kB[22m[1m[22m[2m │ gzip:  3.45 kB[22m
+[2mdist/[22m[36massets/index-D0O1eHp1.js   [39m[1m[2m208.35 kB[22m[1m[22m[2m │ gzip: 67.21 kB[22m
+[32m✓ built in 1.05s[39m

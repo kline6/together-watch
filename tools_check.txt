@@ -1,0 +1,5 @@
+bash: which: command not found
+bash: which: command not found
+bash: which: command not found
+---
+C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\;E:\bandzip\Bandizip\;C:\Program Files\NVIDIA Corporation\NVIDIA app\NvDLISR;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\nodejs\;C:\Program Files\Git\cmd;C:\Program Files\dotnet\;C:\Users\z2213\AppData\Local\Programs\Python\Python312\Scripts\;C:\Users\z2213\AppData\Local\Programs\Python\Python312\;C:\Users\z2213\AppData\Local\Microsoft\WindowsApps;E:\Microsoft VS Code\bin;C:\Users\z2213\AppData\Local\Python\bin;C:\Users\z2213\AppData\Roaming\npm;C:\Users\z2213\.dotnet\tools

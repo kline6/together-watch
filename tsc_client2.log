@@ -1,0 +1,4 @@
+src/pages/RoomPage.tsx(85,5): error TS1128: Declaration or statement expected.
+src/pages/RoomPage.tsx(131,13): error TS1005: ',' expected.
+src/pages/RoomPage.tsx(131,37): error TS1005: ',' expected.
+src/pages/RoomPage.tsx(325,1): error TS1128: Declaration or statement expected.

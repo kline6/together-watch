@@ -1,0 +1,1 @@
+bash: dir: command not found

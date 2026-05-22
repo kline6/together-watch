@@ -1,0 +1,47 @@
+src/types.ts(49,3): error TS1131: Property or signature expected.
+src/types.ts(49,14): error TS1005: ';' expected.
+src/types.ts(49,69): error TS1109: Expression expected.
+src/types.ts(50,13): error TS1005: ';' expected.
+src/types.ts(50,50): error TS1109: Expression expected.
+src/types.ts(51,14): error TS1005: ';' expected.
+src/types.ts(51,50): error TS1109: Expression expected.
+src/types.ts(52,12): error TS1005: ';' expected.
+src/types.ts(52,69): error TS1109: Expression expected.
+src/types.ts(53,16): error TS1005: ';' expected.
+src/types.ts(53,56): error TS1109: Expression expected.
+src/types.ts(54,13): error TS1005: ';' expected.
+src/types.ts(58,13): error TS1109: Expression expected.
+src/types.ts(59,14): error TS1109: Expression expected.
+src/types.ts(59,43): error TS1109: Expression expected.
+src/types.ts(60,18): error TS1005: ';' expected.
+src/types.ts(60,62): error TS1109: Expression expected.
+src/types.ts(61,16): error TS1005: ';' expected.
+src/types.ts(61,70): error TS1109: Expression expected.
+src/types.ts(62,18): error TS1005: ';' expected.
+src/types.ts(62,47): error TS1109: Expression expected.
+src/types.ts(63,12): error TS1005: ';' expected.
+src/types.ts(63,51): error TS1109: Expression expected.
+src/types.ts(64,1): error TS1128: Declaration or statement expected.
+src/types.ts(67,3): error TS1131: Property or signature expected.
+src/types.ts(67,14): error TS1005: ';' expected.
+src/types.ts(71,13): error TS1109: Expression expected.
+src/types.ts(72,12): error TS1005: ';' expected.
+src/types.ts(76,13): error TS1109: Expression expected.
+src/types.ts(77,12): error TS1005: ';' expected.
+src/types.ts(77,53): error TS1109: Expression expected.
+src/types.ts(78,13): error TS1005: ';' expected.
+src/types.ts(78,54): error TS1109: Expression expected.
+src/types.ts(79,12): error TS1005: ';' expected.
+src/types.ts(79,53): error TS1109: Expression expected.
+src/types.ts(80,12): error TS1005: ';' expected.
+src/types.ts(80,54): error TS1109: Expression expected.
+src/types.ts(81,12): error TS1005: ';' expected.
+src/types.ts(81,49): error TS1109: Expression expected.
+src/types.ts(82,15): error TS1005: ';' expected.
+src/types.ts(88,13): error TS1109: Expression expected.
+src/types.ts(89,15): error TS1005: ';' expected.
+src/types.ts(89,54): error TS1109: Expression expected.
+src/types.ts(90,15): error TS1005: ';' expected.
+src/types.ts(90,27): error TS1109: Expression expected.
+src/types.ts(91,53): error TS1109: Expression expected.
+src/types.ts(92,1): error TS1128: Declaration or statement expected.

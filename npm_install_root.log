@@ -1,0 +1,18 @@
+npm warn cleanup Failed to remove some directories [
+npm warn cleanup   [
+npm warn cleanup     '\\\\?\\E:\\项目合集\\project5\\client\\node_modules',
+npm warn cleanup     [Error: EPERM: operation not permitted, rmdir 'E:\项目合集\project5\client\node_modules\@babel\plugin-transform-react-jsx-source'] {
+npm warn cleanup       errno: -4048,
+npm warn cleanup       code: 'EPERM',
+npm warn cleanup       syscall: 'rmdir',
+npm warn cleanup       path: 'E:\\项目合集\\project5\\client\\node_modules\\@babel\\plugin-transform-react-jsx-source'
+npm warn cleanup     }
+npm warn cleanup   ]
+npm warn cleanup ]
+npm error code 1
+npm error path E:\项目合集\project5\client\node_modules\esbuild
+npm error command failed
+npm error command C:\WINDOWS\system32\cmd.exe /d /s /c node install.js
+npm error 'node' is not recognized as an internal or external command,
+npm error operable program or batch file.
+npm error A complete log of this run can be found in: C:\Users\z2213\AppData\Local\npm-cache\_logs\2026-05-22T03_44_58_683Z-debug-0.log
