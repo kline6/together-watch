@@ -57,85 +57,83 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(
     const lastSeekTime = useRef(0);
     const mseRef = useRef(false);
 
-    const [videoSrc, setVideoSrc] = useState(parsedVideo.url);
+    const [videoSrc, setVideoSrc] = useState<string | null>(null);
     const [videoError, setVideoError] = useState<string | null>(null);
     const [mseLoading, setMseLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const refreshAttempted = useRef(false);
+    const initializedRef = useRef(false);
+    const [qualities, setQualities] = useState<{ id: string; height: number; label: string }[]>([]);
+    const [currentQuality, setCurrentQuality] = useState('best');
+    const [showQualityMenu, setShowQualityMenu] = useState(false);
+    const qualityMenuRef = useRef<HTMLDivElement>(null);
 
-    // ====== 视频源初始化：合并 DASH 音视频流 ======
+    // ====== 视频源初始化（仅执行一次） ======
     useEffect(() => {
+      if (initializedRef.current) return;
+      initializedRef.current = true;
+
       const rawAudio = parsedVideo.rawAudioUrl || parsedVideo.audioUrl;
       const rawVideo = parsedVideo.rawUrl || parsedVideo.url;
       const hasSourceUrl = !!parsedVideo.sourceUrl;
 
-      // Bilibili DASH：有独立音频流
-      if (rawAudio && rawVideo) {
-        // 优先用 yt-dlp 下载合并（需要服务端有 ffmpeg）
-        if (hasSourceUrl) {
-          console.log('[VideoPlayer] Bilibili DASH → 使用 yt-dlp 合并下载');
+      if (rawAudio && rawVideo && hasSourceUrl) {
+        console.log('[VideoPlayer] Bilibili DASH → 使用 yt-dlp 合并下载');
+        setMseLoading(true);
+        setVideoSrc(`${API_URL}/api/download-merged?url=${encodeURIComponent(parsedVideo.sourceUrl!)}`);
+      } else if (rawAudio && rawVideo && window.MediaSource) {
+        const videoCodec = parsedVideo.videoCodec || 'avc1.64001f';
+        const audioCodec = parsedVideo.audioCodec || 'mp4a.40.2';
+        const vMime = `video/mp4; codecs="${videoCodec}"`;
+        const aMime = `audio/mp4; codecs="${audioCodec}"`;
+
+        if (MediaSource.isTypeSupported(vMime) && MediaSource.isTypeSupported(aMime)) {
+          console.log('[VideoPlayer] MSE 合并: v=', vMime, 'a=', aMime);
           setMseLoading(true);
           setVideoError(null);
-          setVideoSrc(`${API_URL}/api/download-merged?url=${encodeURIComponent(parsedVideo.sourceUrl!)}`);
-          return;
+          const ms = new MediaSource();
+          const blobUrl = URL.createObjectURL(ms);
+
+          ms.addEventListener('sourceopen', async () => {
+            let vBuf: SourceBuffer, aBuf: SourceBuffer;
+            try {
+              vBuf = ms.addSourceBuffer(vMime);
+              aBuf = ms.addSourceBuffer(aMime);
+            } catch (e) {
+              console.error('[MSE] SourceBuffer 创建失败:', e);
+              setVideoSrc(parsedVideo.url);
+              setMseLoading(false);
+              return;
+            }
+            mseRef.current = true;
+
+            try {
+              const vProxy = `${API_URL}/api/proxy?url=${encodeURIComponent(rawVideo)}`;
+              const aProxy = `${API_URL}/api/proxy?url=${encodeURIComponent(rawAudio)}`;
+              const [vRes, aRes] = await Promise.all([fetch(vProxy), fetch(aProxy)]);
+              if (!vRes.ok || !aRes.ok) throw new Error(`流获取失败: v=${vRes.status} a=${aRes.status}`);
+              if (!vRes.body || !aRes.body) throw new Error('响应体为空');
+              setMseLoading(false);
+              await Promise.all([pumpToBuffer(vRes, vBuf), pumpToBuffer(aRes, aBuf)]);
+              if (ms.readyState === 'open') ms.endOfStream();
+            } catch (e) {
+              console.error('[MSE] 错误:', e);
+              mseRef.current = false;
+              setMseLoading(false);
+              setVideoSrc(parsedVideo.url);
+            }
+          });
+
+          const video = videoRef.current;
+          if (video) video.src = blobUrl;
+          return () => { mseRef.current = false; URL.revokeObjectURL(blobUrl); };
+        } else {
+          setVideoSrc(parsedVideo.url);
         }
-
-        // 没有原始页面 URL，尝试 MediaSource 浏览器端合并
-        if (window.MediaSource) {
-          const videoCodec = parsedVideo.videoCodec || 'avc1.64001f';
-          const audioCodec = parsedVideo.audioCodec || 'mp4a.40.2';
-          const vMime = `video/mp4; codecs="${videoCodec}"`;
-          const aMime = `audio/mp4; codecs="${audioCodec}"`;
-
-          if (MediaSource.isTypeSupported(vMime) && MediaSource.isTypeSupported(aMime)) {
-            console.log('[VideoPlayer] MSE 合并: v=', vMime, 'a=', aMime);
-            setMseLoading(true);
-            setVideoError(null);
-            const ms = new MediaSource();
-            const blobUrl = URL.createObjectURL(ms);
-
-            ms.addEventListener('sourceopen', async () => {
-              let vBuf: SourceBuffer, aBuf: SourceBuffer;
-              try {
-                vBuf = ms.addSourceBuffer(vMime);
-                aBuf = ms.addSourceBuffer(aMime);
-              } catch (e) {
-                console.error('[MSE] SourceBuffer 创建失败:', e);
-                setVideoSrc(parsedVideo.url);
-                setMseLoading(false);
-                return;
-              }
-              mseRef.current = true;
-
-              try {
-                const vProxy = `${API_URL}/api/proxy?url=${encodeURIComponent(rawVideo)}`;
-                const aProxy = `${API_URL}/api/proxy?url=${encodeURIComponent(rawAudio)}`;
-                const [vRes, aRes] = await Promise.all([fetch(vProxy), fetch(aProxy)]);
-                if (!vRes.ok || !aRes.ok) throw new Error(`流获取失败: v=${vRes.status} a=${aRes.status}`);
-                if (!vRes.body || !aRes.body) throw new Error('响应体为空');
-                setMseLoading(false);
-                await Promise.all([pumpToBuffer(vRes, vBuf), pumpToBuffer(aRes, aBuf)]);
-                if (ms.readyState === 'open') ms.endOfStream();
-              } catch (e) {
-                console.error('[MSE] 错误:', e);
-                mseRef.current = false;
-                setMseLoading(false);
-                setVideoSrc(parsedVideo.url);
-              }
-            });
-
-            const video = videoRef.current;
-            if (video) video.src = blobUrl;
-            return () => { mseRef.current = false; URL.revokeObjectURL(blobUrl); };
-          }
-        }
-
-        // MSE 不支持，回退纯视频
-        console.warn('[VideoPlayer] 无法合并音视频，回退纯视频');
+      } else {
+        setVideoSrc(parsedVideo.url);
       }
-
-      setVideoSrc(parsedVideo.url);
-    }, [parsedVideo.url, parsedVideo.audioUrl, parsedVideo.sourceUrl]);
+    }, []); // 空依赖，只执行一次
 
     // ====== 刷新过期链接 ======
     const refreshVideoUrl = useCallback(async () => {
@@ -254,6 +252,46 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(
         });
     }, [parsedVideo.url]);
 
+    // ====== 获取可用画质列表 ======
+    useEffect(() => {
+      if (!parsedVideo.sourceUrl) return;
+      const src = encodeURIComponent(parsedVideo.sourceUrl);
+      console.log('[VideoPlayer] 获取画质列表:', parsedVideo.sourceUrl.substring(0, 60));
+      fetch(`${API_URL}/api/formats?url=${src}`)
+        .then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
+        .then(data => {
+          console.log('[VideoPlayer] 画质列表:', data.formats?.length || 0, '项');
+          if (data.formats?.length > 0) setQualities(data.formats);
+        })
+        .catch((err) => {
+          console.error('[VideoPlayer] 获取画质失败:', err.message);
+        });
+    }, [parsedVideo.sourceUrl]);
+
+    // ====== 切换画质（下载完成后才切换） ======
+    const switchQuality = useCallback((quality: string) => {
+      if (quality === currentQuality || !parsedVideo.sourceUrl) return;
+      setCurrentQuality(quality);
+      setShowQualityMenu(false);
+      setMseLoading(true);
+      setVideoError(null);
+      setVideoSrc(`${API_URL}/api/download-merged?url=${encodeURIComponent(parsedVideo.sourceUrl)}&q=${quality}`);
+    }, [currentQuality, parsedVideo.sourceUrl]);
+
+    // 点击外部关闭画质菜单
+    useEffect(() => {
+      const handleClick = (e: MouseEvent) => {
+        if (qualityMenuRef.current && !qualityMenuRef.current.contains(e.target as Node)) {
+          setShowQualityMenu(false);
+        }
+      };
+      document.addEventListener('mousedown', handleClick);
+      return () => document.removeEventListener('mousedown', handleClick);
+    }, []);
+
     // ====== 错误处理 ======
     const handleVideoError = useCallback(() => {
       const v = videoRef.current;
@@ -261,7 +299,7 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(
       if (mseRef.current) return; // MSE 模式下忽略
 
       // yt-dlp 合并下载失败
-      if (videoSrc.includes('/api/download-merged')) {
+      if (videoSrc?.includes('/api/download-merged')) {
         setMseLoading(false);
         setVideoError('音视频合并下载失败，可能是服务器未安装 ffmpeg。点击下方按钮尝试纯视频播放。');
         return;
@@ -375,7 +413,7 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(
                     刷新视频链接
                   </button>
                 )}
-                {videoSrc.includes('/api/download-merged') && (
+                {videoSrc?.includes('/api/download-merged') && (
                   <button className="video-refresh-btn" onClick={() => { setVideoError(null); setVideoSrc(parsedVideo.url); }}>
                     尝试纯视频播放（无音频）
                   </button>
@@ -390,6 +428,34 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(
             <div className="video-error-box">
               <div className="video-error-title">正在刷新视频链接...</div>
             </div>
+          </div>
+        )}
+
+        {parsedVideo.sourceUrl && videoSrc?.includes('/api/download-merged') && (
+          <div className="quality-selector" ref={qualityMenuRef}>
+            <button
+              className="quality-btn"
+              onClick={() => setShowQualityMenu(!showQualityMenu)}
+              title="切换画质"
+            >
+              {currentQuality === 'best' ? '自动' : currentQuality.toUpperCase()}
+            </button>
+            {showQualityMenu && (
+              <div className="quality-menu">
+                {qualities.length === 0 && (
+                  <div className="quality-loading">加载中...</div>
+                )}
+                {qualities.map((q) => (
+                  <button
+                    key={q.id}
+                    className={`quality-option ${(q.id === currentQuality || q.label.toLowerCase() === currentQuality) ? 'active' : ''}`}
+                    onClick={() => switchQuality(q.label.toLowerCase())}
+                  >
+                    {q.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

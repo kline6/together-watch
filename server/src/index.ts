@@ -32,7 +32,7 @@ const httpServer = createServer(app);
 
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
   cors: {
-    origin: process.env.NODE_ENV === 'production' ? false : ['http://localhost:5173'],
+    origin: process.env.NODE_ENV === 'production' ? '*' : ['http://localhost:5173'],
     methods: ['GET', 'POST'],
   },
   pingInterval: 10000,
@@ -305,9 +305,62 @@ app.post('/api/refresh-url', async (req, res) => {
   }
 });
 
+// ---- 获取视频可用画质列表 ----
+app.get('/api/formats', async (req, res) => {
+  const pageUrl = req.query.url as string;
+  if (!pageUrl) return res.status(400).json({ error: 'Missing url' });
+  if (!isYtDlpAvailable()) return res.status(500).json({ error: 'yt-dlp 未安装' });
+
+  try {
+    console.log('[formats] 获取:', pageUrl.substring(0, 80));
+
+    const output = await new Promise<string>((resolve, reject) => {
+      const child = execFile('yt-dlp', [
+        '--dump-json', '--no-warnings', '--no-playlist', pageUrl,
+      ], {
+        timeout: 30000,
+        maxBuffer: 10 * 1024 * 1024,
+      }, (err, stdout, stderr) => {
+        if (err) {
+          const msg = (stderr || '').substring(0, 300) || err.message;
+          reject(new Error(msg));
+        } else {
+          resolve(stdout);
+        }
+      });
+    });
+
+    const data = JSON.parse(output);
+
+    // 提取视频格式（排除纯音频）
+    const formats = (data.formats || [])
+      .filter((f: any) => f.vcodec && f.vcodec !== 'none' && f.height)
+      .sort((a: any, b: any) => (b.height || 0) - (a.height || 0));
+
+    // 去重并按高度分组
+    const seenHeights = new Set<number>();
+    const unique: { id: string; height: number; label: string }[] = [];
+    for (const f of formats) {
+      const h = f.height;
+      if (h && !seenHeights.has(h)) {
+        seenHeights.add(h);
+        const label = h >= 2160 ? '4K' : h >= 1440 ? '2K' : h >= 1080 ? '1080P' : h >= 720 ? '720P' : h >= 480 ? '480P' : h >= 360 ? '360P' : `${h}P`;
+        unique.push({ id: f.format_id, height: h, label });
+      }
+    }
+
+    console.log('[formats] 可用画质:', unique.map(f => f.label).join(', '));
+    res.json({ formats: unique, title: data.title || '' });
+  } catch (err: any) {
+    console.error('[formats] 获取失败:', err.message);
+    res.status(500).json({ error: '获取画质列表失败: ' + err.message });
+  }
+});
+
 // ---- 用 yt-dlp 下载并合并 DASH 音视频流（参考 DataTool 方案） ----
 app.get('/api/download-merged', (req, res) => {
   const pageUrl = req.query.url as string;
+  const quality = req.query.q as string || 'best'; // 'best' | format_id | height
   if (!pageUrl) return res.status(400).json({ error: 'Missing url' });
 
   console.log('[yt-dlp] 下载合并:', pageUrl.substring(0, 80));
@@ -321,15 +374,16 @@ app.get('/api/download-merged', (req, res) => {
   const tmpName = `merged_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const tmpPath = path.join(UPLOAD_DIR, tmpName + '.mp4');
 
-  // yt-dlp 命令：下载最佳视频+最佳音频，合并为 mp4
+  // yt-dlp 格式：自动选最佳视频+音频（H.264 优先）
   const args = [
     pageUrl,
-    '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
+    '-f', 'bv*+ba/bestvideo+bestaudio/best',
+    '--format-sort', 'res,codec:h264',
     '--merge-output-format', 'mp4',
     '-o', tmpPath,
     '--no-warnings',
     '--no-check-certificates',
-    '--newline',  // 每行输出进度，方便解析
+    '--newline',
   ];
 
   console.log('[yt-dlp] 执行:', 'yt-dlp', args.slice(0, 5).join(' '));

@@ -290,15 +290,18 @@ const RoomPage: React.FC<Props> = ({
   const parsedVideo: ParsedVideo | null = roomData?.parsedVideo || null;
 
   // Route external video URLs through the server proxy
-  const effectiveVideo: ParsedVideo | null = parsedVideo ? {
-    ...parsedVideo,
-    url: parsedVideo.url.startsWith('http')
-      ? `${API_URL}/api/proxy?url=${encodeURIComponent(parsedVideo.url)}${parsedVideo.referer ? `&referer=${encodeURIComponent(parsedVideo.referer)}` : ''}`
-      : parsedVideo.url,
-    audioUrl: parsedVideo.audioUrl?.startsWith('http')
-      ? `${API_URL}/api/proxy?url=${encodeURIComponent(parsedVideo.audioUrl)}${parsedVideo.referer ? `&referer=${encodeURIComponent(parsedVideo.referer)}` : ''}`
-      : parsedVideo.audioUrl,
-  } : null;
+  const effectiveVideo = React.useMemo(() => {
+    if (!parsedVideo) return null;
+    return {
+      ...parsedVideo,
+      url: parsedVideo.url.startsWith('http')
+        ? `${API_URL}/api/proxy?url=${encodeURIComponent(parsedVideo.url)}${parsedVideo.referer ? `&referer=${encodeURIComponent(parsedVideo.referer)}` : ''}`
+        : parsedVideo.url,
+      audioUrl: parsedVideo.audioUrl?.startsWith('http')
+        ? `${API_URL}/api/proxy?url=${encodeURIComponent(parsedVideo.audioUrl)}${parsedVideo.referer ? `&referer=${encodeURIComponent(parsedVideo.referer)}` : ''}`
+        : parsedVideo.audioUrl,
+    };
+  }, [parsedVideo]);
 
   if (!effectiveVideo) {
     return (

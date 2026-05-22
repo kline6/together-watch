@@ -111,37 +111,76 @@ async function extractPageInfo(url: string): Promise<{ bvid: string; aid: number
   });
   const html = await resp.text();
 
-  // Extract __INITIAL_STATE__
+  // Strategy 1: Extract __INITIAL_STATE__
   const stateMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*(\{.+?\});\s*(?:window\.|<\/script>)/s);
-  if (!stateMatch) {
-    console.log('[bilibili] __INITIAL_STATE__ not found in page');
+  if (stateMatch) {
+    try {
+      const state = JSON.parse(stateMatch[1]);
+      const videoData = state.videoData;
+      if (videoData) {
+        const bvid = videoData.bvid;
+        const aid = videoData.aid;
+        const page = parseBilibiliUrl(url)?.page || 1;
+        let cid = videoData.cid;
+        if (videoData.pages && videoData.pages.length >= page) {
+          cid = videoData.pages[page - 1].cid;
+        }
+        const title = videoData.title || '';
+        console.log('[bilibili] Extracted from __INITIAL_STATE__:', { bvid, aid, cid, title: title.substring(0, 40) });
+        return { bvid, aid, cid, title };
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  // Strategy 2: Extract bvid from page URL, cid from __playinfo__ or video-info element
+  const parsed = parseBilibiliUrl(url);
+  if (!parsed?.bvid && !parsed?.aid) {
+    console.log('[bilibili] Could not extract bvid/aid from URL');
     return null;
   }
 
-  try {
-    const state = JSON.parse(stateMatch[1]);
-    const videoData = state.videoData;
-    if (!videoData) {
-      console.log('[bilibili] videoData not found in __INITIAL_STATE__');
-      return null;
-    }
+  const bvid = parsed.bvid || '';
+  const aid = parsed.aid || 0;
 
-    const bvid = videoData.bvid;
-    const aid = videoData.aid;
-    const page = parseBilibiliUrl(url)?.page || 1;
-    // For multi-part videos, get the cid of the specific page
-    let cid = videoData.cid;
-    if (videoData.pages && videoData.pages.length >= page) {
-      cid = videoData.pages[page - 1].cid;
-    }
-    const title = videoData.title || '';
+  // Try to extract cid from __playinfo__ first
+  const playInfoMatch = html.match(/window\.__playinfo__\s*=\s*(\{.+?\});\s*(?:window\.|<\/script>)/s);
+  if (playInfoMatch) {
+    try {
+      const playInfo = JSON.parse(playInfoMatch[1]);
+      const cid = playInfo?.data?.cid;
+      if (cid) {
+        const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+        const title = titleMatch?.[1]?.replace(/_哔哩哔哩.*$/, '').trim() || '';
+        console.log('[bilibili] Extracted from __playinfo__ cid:', cid, 'title:', title.substring(0, 40));
+        return { bvid, aid, cid, title };
+      }
+    } catch {}
+  }
 
-    console.log('[bilibili] Extracted from page:', { bvid, aid, cid, title: title.substring(0, 40) });
+  // Strategy 3: Search for cid in embedded video data (React state, JSON-LD, etc.)
+  const cidMatch = html.match(/"cid"\s*:\s*(\d+)/);
+  if (cidMatch) {
+    const cid = parseInt(cidMatch[1]);
+    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    const title = titleMatch?.[1]?.replace(/_哔哩哔哩.*$/, '').trim() || '';
+    console.log('[bilibili] Extracted cid from regex:', cid, 'title:', title.substring(0, 40));
     return { bvid, aid, cid, title };
-  } catch (e) {
-    console.log('[bilibili] Failed to parse __INITIAL_STATE__:', (e as Error).message);
-    return null;
   }
+
+  // Strategy 4: Extract cid from HTML meta or script JSON-LD
+  const jsonLdMatch = html.match(/"contentUrl"\s*:\s*"[^"]+(\d+)"[^}]*"duration"/s);
+  if (jsonLdMatch) {
+    const cid = parseInt(jsonLdMatch[1]);
+    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    const title = titleMatch?.[1]?.replace(/_哔哩哔哩.*$/, '').trim() || '';
+    console.log('[bilibili] Extracted cid from JSON-LD:', cid);
+    return { bvid, aid, cid, title };
+  }
+
+  console.log('[bilibili] Could not find cid in page');
+  return null;
 }
 
 /**
@@ -185,16 +224,15 @@ function extractPlayInfoFromHtml(html: string): { videoUrl: string; audioUrl?: s
 
 /**
  * Get video play URL from Bilibili API.
- * Uses fnval=1 to request FLV/MP4 combined format.
- * If DASH is returned, extracts both video and audio URLs.
+ * Uses fnval=4048 to request DASH format (separate video + audio streams).
  */
 async function getPlayUrl(bvid: string, cid: number): Promise<{ videoUrl: string; audioUrl?: string; videoCodec?: string; audioCodec?: string } | null> {
   const params: Record<string, string | number> = {
     bvid,
     cid,
-    fnval: 1, // 1 = FLV/MP4 (combined), 4048 = DASH (separate)
-    qn: 64,   // quality: 720P
-    fourk: 0,
+    fnval: 4048, // DASH format (separate video + audio streams), includes codecs info
+    qn: 80,      // quality: 1080P (16=360P, 32=480P, 64=720P, 80=1080P, 116=1080P60, 120=4K)
+    fourk: 1,
   };
 
   const signed = await signWbi(params);
