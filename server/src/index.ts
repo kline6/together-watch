@@ -10,6 +10,7 @@ import multer from 'multer';
 import { RoomManager } from './roomManager.js';
 import { parseVideoUrl, parseVideoUrlAsync } from './videoParser.js';
 import { isYtDlpAvailable } from './videoExtractor.js';
+import { extractBilibiliVideo, isBilibiliUrl } from './bilibiliExtractor.js';
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -362,108 +363,132 @@ app.get('/api/formats', async (req, res) => {
   }
 });
 
-// ---- 用 yt-dlp 下载并合并 DASH 音视频流（参考 DataTool 方案） ----
-app.get('/api/download-merged', (req, res) => {
+// ---- 下载并合并音视频流（B站用API+ffmpeg，其他用yt-dlp） ----
+app.get('/api/download-merged', async (req, res) => {
   const pageUrl = req.query.url as string;
-  const quality = req.query.q as string || 'best'; // 'best' | format_id | height
+  const quality = req.query.q as string || 'best';
   if (!pageUrl) return res.status(400).json({ error: 'Missing url' });
 
-  console.log('[yt-dlp] 下载合并:', pageUrl.substring(0, 80));
+  console.log('[download-merged] 请求:', pageUrl.substring(0, 80));
 
-  // 检查 yt-dlp 是否可用
+  const tmpName = `merged_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const tmpPath = path.join(UPLOAD_DIR, tmpName + '.mp4');
+
+  // B站视频：用专用API获取流地址，再用ffmpeg合并
+  if (isBilibiliUrl(pageUrl)) {
+    console.log('[download-merged] 检测到B站，使用API方案');
+    try {
+      const info = await extractBilibiliVideo(pageUrl);
+      if (!info || !info.url) {
+        return res.status(500).json({ error: 'B站视频解析失败' });
+      }
+      if (!info.audioUrl) {
+        // 纯视频流（无独立音频），直接代理
+        console.log('[download-merged] B站无独立音频，直接返回视频流');
+        return res.redirect(`/api/proxy?url=${encodeURIComponent(info.url)}`);
+      }
+
+      // 下载视频+音频流，用ffmpeg合并
+      console.log('[download-merged] B站DASH，用ffmpeg合并');
+      const videoProxy = `/api/proxy?url=${encodeURIComponent(info.url)}`;
+      const audioProxy = `/api/proxy?url=${encodeURIComponent(info.audioUrl)}`;
+      const videoTmp = path.join(UPLOAD_DIR, `${tmpName}_v.mp4`);
+      const audioTmp = path.join(UPLOAD_DIR, `${tmpName}_a.mp4`);
+
+      // 通过代理下载两个流
+      const baseUrl = `http://localhost:${process.env.PORT || 3001}`;
+      const [vRes, aRes] = await Promise.all([
+        fetch(`${baseUrl}${videoProxy}`, { headers: { 'Referer': 'https://www.bilibili.com/', 'User-Agent': 'Mozilla/5.0' } }),
+        fetch(`${baseUrl}${audioProxy}`, { headers: { 'Referer': 'https://www.bilibili.com/', 'User-Agent': 'Mozilla/5.0' } }),
+      ]);
+
+      if (!vRes.ok || !aRes.ok) {
+        console.error('[download-merged] 流下载失败: v=', vRes.status, 'a=', aRes.status);
+        return res.status(502).json({ error: '视频流下载失败' });
+      }
+
+      // 写入临时文件
+      const vBuf = Buffer.from(await vRes.arrayBuffer());
+      const aBuf = Buffer.from(await aRes.arrayBuffer());
+      fs.writeFileSync(videoTmp, vBuf);
+      fs.writeFileSync(audioTmp, aBuf);
+      console.log('[download-merged] 流下载完成: v=', vBuf.length, 'a=', aBuf.length);
+
+      // ffmpeg合并
+      await new Promise<void>((resolve, reject) => {
+        const ff = spawn('ffmpeg', [
+          '-i', videoTmp, '-i', audioTmp,
+          '-c:v', 'copy', '-c:a', 'copy',
+          '-movflags', '+faststart',
+          '-y', tmpPath,
+        ], { timeout: 60000 });
+
+        let stderr = '';
+        ff.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+        ff.on('error', reject);
+        ff.on('close', (code) => {
+          // 清理临时文件
+          try { fs.unlinkSync(videoTmp); } catch {}
+          try { fs.unlinkSync(audioTmp); } catch {}
+          if (code === 0) resolve();
+          else reject(new Error(`ffmpeg exit ${code}: ${stderr.slice(-200)}`));
+        });
+      });
+
+      console.log('[download-merged] B站合并完成');
+      serveFile(tmpPath, res);
+    } catch (err: any) {
+      console.error('[download-merged] B站方案失败:', err.message);
+      if (!res.headersSent) res.status(500).json({ error: 'B站视频合并失败: ' + err.message });
+      try { fs.unlinkSync(tmpPath); } catch {}
+    }
+    return;
+  }
+
+  // 非B站：用yt-dlp
   if (!isYtDlpAvailable()) {
     return res.status(500).json({ error: 'yt-dlp 未安装，无法合并音视频' });
   }
 
-  // 用时间戳做临时文件名，避免冲突
-  const tmpName = `merged_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const tmpPath = path.join(UPLOAD_DIR, tmpName + '.mp4');
-
-  // yt-dlp 格式：自动选最佳视频+音频（H.264 优先）
+  console.log('[download-merged] 使用yt-dlp:', pageUrl.substring(0, 80));
   const args = [
     '-f', 'bv*+ba/bestvideo+bestaudio/best',
     '--format-sort', 'res,codec:h264',
     '--merge-output-format', 'mp4',
     '-o', tmpPath,
-    '--no-warnings',
-    '--no-check-certificates',
-    '--newline',
-    '--retries', '3',
-    '--extractor-retries', '3',
-    '--socket-timeout', '30',
+    '--no-warnings', '--no-check-certificates', '--newline',
+    '--retries', '3', '--extractor-retries', '3', '--socket-timeout', '30',
     pageUrl,
   ];
 
-  console.log('[yt-dlp] 执行: yt-dlp', args.join(' '));
-
   let responseSent = false;
-
-  // Use spawn instead of execFile to avoid shell interpretation of & in URLs
   const child = spawn('yt-dlp', args, { timeout: 300000 });
-
   let stderrBuf = '';
-
-  child.stderr?.on('data', (data: Buffer) => {
-    stderrBuf += data.toString();
-  });
+  child.stderr?.on('data', (data: Buffer) => { stderrBuf += data.toString(); });
 
   child.on('error', (err) => {
     console.error('[yt-dlp] spawn error:', err.message);
-    if (!responseSent && !res.headersSent) {
-      responseSent = true;
-      res.status(500).json({ error: 'yt-dlp 启动失败: ' + err.message });
-    }
+    if (!responseSent && !res.headersSent) { responseSent = true; res.status(500).json({ error: 'yt-dlp 启动失败: ' + err.message }); }
     cleanupTmpFiles();
   });
 
   child.on('close', (code) => {
-    if (responseSent) {
-      if (code !== 0) console.error('[yt-dlp] 退出码:', code);
-      return;
-    }
-
+    if (responseSent) { if (code !== 0) console.error('[yt-dlp] 退出码:', code); return; }
     if (code !== 0) {
       console.error('[yt-dlp] 错误, 退出码:', code);
       console.error('[yt-dlp] stderr:', stderrBuf.substring(0, 500));
-      if (!res.headersSent) {
-        const isFfmpeg = stderrBuf.includes('ffmpeg');
-        responseSent = true;
-        res.status(500).json({
-          error: isFfmpeg ? '服务器未安装 ffmpeg，无法合并音视频流' : 'yt-dlp 下载失败 (code ' + code + ')',
-        });
-      }
-      cleanupTmpFiles();
-      return;
+      if (!res.headersSent) { responseSent = true; res.status(500).json({ error: 'yt-dlp 下载失败 (code ' + code + ')' }); }
+      cleanupTmpFiles(); return;
     }
-
-    // 下载完成，开始发送文件
     const actualPath = findMergedFile(tmpPath);
-    if (!actualPath) {
-      console.error('[yt-dlp] 文件不存在');
-      if (!res.headersSent) {
-        responseSent = true;
-        res.status(500).json({ error: '下载完成但文件不存在' });
-      }
-      return;
-    }
-
+    if (!actualPath) { if (!res.headersSent) { responseSent = true; res.status(500).json({ error: '下载完成但文件不存在' }); } return; }
     responseSent = true;
     serveFile(actualPath, res);
   });
 
-  // 流式输出 yt-dlp 的进度到控制台
-  child.stdout?.on('data', (data: Buffer) => {
-    const line = data.toString().trim();
-    if (line.includes('%')) console.log('[yt-dlp]', line);
-  });
+  child.stdout?.on('data', (data: Buffer) => { const line = data.toString().trim(); if (line.includes('%')) console.log('[yt-dlp]', line); });
 
-  // 客户端断开时清理
-  req.on('close', () => {
-    if (!child.killed) {
-      try { child.kill(); } catch {}
-    }
-    cleanupTmpFiles();
-  });
+  req.on('close', () => { if (!child.killed) { try { child.kill(); } catch {} } cleanupTmpFiles(); });
 
   function findMergedFile(primary: string): string | null {
     if (fs.existsSync(primary)) return primary;
