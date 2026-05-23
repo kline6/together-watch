@@ -390,16 +390,18 @@ app.get('/api/download-merged', async (req, res) => {
 
       // 下载视频+音频流，用ffmpeg合并
       console.log('[download-merged] B站DASH，用ffmpeg合并');
-      const videoProxy = `/api/proxy?url=${encodeURIComponent(info.url)}`;
-      const audioProxy = `/api/proxy?url=${encodeURIComponent(info.audioUrl)}`;
       const videoTmp = path.join(UPLOAD_DIR, `${tmpName}_v.mp4`);
       const audioTmp = path.join(UPLOAD_DIR, `${tmpName}_a.mp4`);
 
-      // 通过代理下载两个流
-      const baseUrl = `http://localhost:${process.env.PORT || 3001}`;
+      // 直接下载视频+音频流（不走代理，避免502）
+      console.log('[download-merged] 下载B站DASH流...');
+      const headers = {
+        'Referer': 'https://www.bilibili.com/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      };
       const [vRes, aRes] = await Promise.all([
-        fetch(`${baseUrl}${videoProxy}`, { headers: { 'Referer': 'https://www.bilibili.com/', 'User-Agent': 'Mozilla/5.0' } }),
-        fetch(`${baseUrl}${audioProxy}`, { headers: { 'Referer': 'https://www.bilibili.com/', 'User-Agent': 'Mozilla/5.0' } }),
+        fetch(info.url, { headers }),
+        fetch(info.audioUrl, { headers }),
       ]);
 
       if (!vRes.ok || !aRes.ok) {
@@ -407,7 +409,6 @@ app.get('/api/download-merged', async (req, res) => {
         return res.status(502).json({ error: '视频流下载失败' });
       }
 
-      // 写入临时文件
       const vBuf = Buffer.from(await vRes.arrayBuffer());
       const aBuf = Buffer.from(await aRes.arrayBuffer());
       fs.writeFileSync(videoTmp, vBuf);
