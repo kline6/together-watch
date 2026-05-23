@@ -310,6 +310,12 @@ app.post('/api/refresh-url', async (req, res) => {
 app.get('/api/formats', async (req, res) => {
   const pageUrl = req.query.url as string;
   if (!pageUrl) return res.status(400).json({ error: 'Missing url' });
+
+  // B站视频暂不支持画质切换（自动选择最佳画质）
+  if (isBilibiliUrl(pageUrl)) {
+    return res.json({ formats: [], title: '' });
+  }
+
   if (!isYtDlpAvailable()) return res.status(500).json({ error: 'yt-dlp 未安装' });
 
   try {

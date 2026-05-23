@@ -90,8 +90,14 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(
 
       const rawAudio = parsedVideo.rawAudioUrl || parsedVideo.audioUrl;
       const rawVideo = parsedVideo.rawUrl || parsedVideo.url;
+      // B站视频流太大，MSE放不下，直接用服务端ffmpeg合并
+      const isBilibili = parsedVideo.sourceUrl?.includes('bilibili.com') || parsedVideo.sourceUrl?.includes('b23.tv');
 
-      if (rawAudio && rawVideo && window.MediaSource) {
+      if (isBilibili && parsedVideo.sourceUrl) {
+        console.log('[VideoPlayer] B站视频 → 服务端合并下载');
+        setMseLoading(true);
+        setVideoSrc(`${API_URL}/api/download-merged?url=${encodeURIComponent(parsedVideo.sourceUrl)}`);
+      } else if (rawAudio && rawVideo && window.MediaSource) {
         const videoCodec = parsedVideo.videoCodec || 'avc1.64001f';
         const audioCodec = parsedVideo.audioCodec || 'mp4a.40.2';
         const vMime = `video/mp4; codecs="${videoCodec}"`;
