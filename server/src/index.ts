@@ -5,7 +5,7 @@ import { Server } from 'socket.io';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import multer from 'multer';
 import { RoomManager } from './roomManager.js';
 import { parseVideoUrl, parseVideoUrlAsync } from './videoParser.js';
@@ -315,15 +315,20 @@ app.get('/api/formats', async (req, res) => {
     console.log('[formats] 获取:', pageUrl.substring(0, 80));
 
     const output = await new Promise<string>((resolve, reject) => {
-      const child = execFile('yt-dlp', [
+      const child = spawn('yt-dlp', [
         '--dump-json', '--no-warnings', '--no-playlist', pageUrl,
-      ], {
-        timeout: 30000,
-        maxBuffer: 10 * 1024 * 1024,
-      }, (err, stdout, stderr) => {
-        if (err) {
-          const msg = (stderr || '').substring(0, 300) || err.message;
-          reject(new Error(msg));
+      ], { timeout: 30000 });
+
+      let stdout = '';
+      let stderr = '';
+
+      child.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
+      child.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
+
+      child.on('error', (err) => reject(err));
+      child.on('close', (code) => {
+        if (code !== 0) {
+          reject(new Error(stderr.substring(0, 300) || `exit code ${code}`));
         } else {
           resolve(stdout);
         }
@@ -376,7 +381,6 @@ app.get('/api/download-merged', (req, res) => {
 
   // yt-dlp 格式：自动选最佳视频+音频（H.264 优先）
   const args = [
-    pageUrl,
     '-f', 'bv*+ba/bestvideo+bestaudio/best',
     '--format-sort', 'res,codec:h264',
     '--merge-output-format', 'mp4',
@@ -387,25 +391,45 @@ app.get('/api/download-merged', (req, res) => {
     '--retries', '3',
     '--extractor-retries', '3',
     '--socket-timeout', '30',
+    pageUrl,
   ];
 
-  console.log('[yt-dlp] 执行:', 'yt-dlp', args.slice(0, 5).join(' '));
+  console.log('[yt-dlp] 执行: yt-dlp', args.join(' '));
 
   let responseSent = false;
 
-  const child = execFile('yt-dlp', args, { timeout: 300000 }, (err, _stdout, stderr) => {
+  // Use spawn instead of execFile to avoid shell interpretation of & in URLs
+  const child = spawn('yt-dlp', args, { timeout: 300000 });
+
+  let stderrBuf = '';
+
+  child.stderr?.on('data', (data: Buffer) => {
+    stderrBuf += data.toString();
+  });
+
+  child.on('error', (err) => {
+    console.error('[yt-dlp] spawn error:', err.message);
+    if (!responseSent && !res.headersSent) {
+      responseSent = true;
+      res.status(500).json({ error: 'yt-dlp 启动失败: ' + err.message });
+    }
+    cleanupTmpFiles();
+  });
+
+  child.on('close', (code) => {
     if (responseSent) {
-      if (err) console.error('[yt-dlp] 流式输出期间错误:', err.message);
+      if (code !== 0) console.error('[yt-dlp] 退出码:', code);
       return;
     }
 
-    if (err) {
-      console.error('[yt-dlp] 错误:', err.message);
-      console.error('[yt-dlp] stderr:', stderr?.substring(0, 500));
+    if (code !== 0) {
+      console.error('[yt-dlp] 错误, 退出码:', code);
+      console.error('[yt-dlp] stderr:', stderrBuf.substring(0, 500));
       if (!res.headersSent) {
-        const isFfmpeg = err.message.includes('ffmpeg') || (stderr && stderr.includes('ffmpeg'));
+        const isFfmpeg = stderrBuf.includes('ffmpeg');
+        responseSent = true;
         res.status(500).json({
-          error: isFfmpeg ? '服务器未安装 ffmpeg，无法合并音视频流' : 'yt-dlp 下载失败: ' + err.message,
+          error: isFfmpeg ? '服务器未安装 ffmpeg，无法合并音视频流' : 'yt-dlp 下载失败 (code ' + code + ')',
         });
       }
       cleanupTmpFiles();
@@ -417,6 +441,7 @@ app.get('/api/download-merged', (req, res) => {
     if (!actualPath) {
       console.error('[yt-dlp] 文件不存在');
       if (!res.headersSent) {
+        responseSent = true;
         res.status(500).json({ error: '下载完成但文件不存在' });
       }
       return;

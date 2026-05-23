@@ -63,6 +63,8 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(
     const [refreshing, setRefreshing] = useState(false);
     const refreshAttempted = useRef(false);
     const initializedRef = useRef(false);
+    const pendingSeekRef = useRef<number | null>(null);
+    const pendingPlayRef = useRef(false);
     const [qualities, setQualities] = useState<{ id: string; height: number; label: string }[]>([]);
     const [currentQuality, setCurrentQuality] = useState('best');
     const [showQualityMenu, setShowQualityMenu] = useState(false);
@@ -170,21 +172,27 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(
       getCurrentTime: () => videoRef.current?.currentTime ?? lastTimeRef.current,
       setCurrentTime: (t: number) => {
         lastSeekTime.current = t;
-        if (videoRef.current) {
+        if (videoRef.current && videoRef.current.readyState >= 1) {
           isInternalAction.current = true;
           videoRef.current.currentTime = t;
           setTimeout(() => { isInternalAction.current = false; }, 200);
+        } else {
+          // Video not ready yet (still loading), store for later
+          pendingSeekRef.current = t;
         }
         lastTimeRef.current = t;
       },
       play: () => {
-        if (videoRef.current) {
+        if (videoRef.current && videoRef.current.readyState >= 1) {
           isInternalAction.current = true;
           videoRef.current.play().catch(() => {});
           setTimeout(() => { isInternalAction.current = false; }, 200);
+        } else {
+          pendingPlayRef.current = true;
         }
       },
       pause: () => {
+        pendingPlayRef.current = false; // Cancel any pending play
         if (videoRef.current) {
           isInternalAction.current = true;
           videoRef.current.pause();
@@ -347,12 +355,40 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(
       onRateChange(videoRef.current.playbackRate);
     }, [onRateChange]);
 
-    const handleLoadedData = useCallback(() => { setMseLoading(false); }, []);
+    const handleLoadedData = useCallback(() => {
+      setMseLoading(false);
+      const v = videoRef.current;
+      if (!v) return;
+
+      // Apply pending seek (from sync before video was ready)
+      if (pendingSeekRef.current !== null) {
+        const target = pendingSeekRef.current;
+        pendingSeekRef.current = null;
+        isInternalAction.current = true;
+        v.currentTime = target;
+        lastTimeRef.current = target;
+        lastSeekTime.current = target;
+        setTimeout(() => { isInternalAction.current = false; }, 200);
+      }
+
+      // Apply pending play (from sync before video was ready)
+      if (pendingPlayRef.current) {
+        pendingPlayRef.current = false;
+        isInternalAction.current = true;
+        v.play().catch(() => {});
+        setTimeout(() => { isInternalAction.current = false; }, 200);
+      }
+    }, []);
 
     // ====== 同步 ======
     useEffect(() => {
       const v = videoRef.current;
       if (!v || isInternalAction.current || mseLoading) return;
+      // Don't try to play/pause if video hasn't loaded yet
+      if (v.readyState < 1) {
+        if (isPlaying) pendingPlayRef.current = true;
+        return;
+      }
       isInternalAction.current = true;
       if (isPlaying && v.paused) {
         v.play().catch(() => {}).finally(() => { isInternalAction.current = false; });
@@ -363,6 +399,11 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(
 
     useEffect(() => {
       if (isInternalAction.current || !videoRef.current || mseLoading) return;
+      // If video not ready, store pending seek
+      if (videoRef.current.readyState < 1) {
+        pendingSeekRef.current = currentTime;
+        return;
+      }
       if (Math.abs(videoRef.current.currentTime - currentTime) > 0.1) {
         isInternalAction.current = true;
         videoRef.current.currentTime = currentTime;
