@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { ParsedVideo } from './types.js';
 
 /**
@@ -8,8 +8,9 @@ import { ParsedVideo } from './types.js';
 export function extractWithYtDlp(url: string): ParsedVideo | null {
   try {
     console.log('[yt-dlp] 开始提取:', url);
-    const output = execSync(
-      `yt-dlp --dump-json --no-warnings --no-playlist "${url.replace(/"/g, '\\"')}"`,
+    const output = execFileSync(
+      'yt-dlp',
+      ['--dump-json', '--no-warnings', '--no-playlist', url],
       { encoding: 'utf-8', timeout: 30000, maxBuffer: 1024 * 1024 }
     );
 
@@ -106,7 +107,7 @@ export function extractWithYtDlp(url: string): ParsedVideo | null {
  */
 export function isYtDlpAvailable(): boolean {
   try {
-    const version = execSync('yt-dlp --version', { encoding: 'utf-8', timeout: 5000 }).trim();
+    const version = execFileSync('yt-dlp', ['--version'], { encoding: 'utf-8', timeout: 5000 }).trim();
     console.log('[yt-dlp] 可用, 版本:', version);
     return true;
   } catch {

@@ -384,13 +384,16 @@ app.get('/api/download-merged', (req, res) => {
     '--no-warnings',
     '--no-check-certificates',
     '--newline',
+    '--retries', '3',
+    '--extractor-retries', '3',
+    '--socket-timeout', '30',
   ];
 
   console.log('[yt-dlp] 执行:', 'yt-dlp', args.slice(0, 5).join(' '));
 
   let responseSent = false;
 
-  const child = execFile('yt-dlp', args, { timeout: 180000 }, (err, _stdout, stderr) => {
+  const child = execFile('yt-dlp', args, { timeout: 300000 }, (err, _stdout, stderr) => {
     if (responseSent) {
       if (err) console.error('[yt-dlp] 流式输出期间错误:', err.message);
       return;
