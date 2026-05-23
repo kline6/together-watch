@@ -180,7 +180,7 @@ const RoomPage: React.FC<Props> = ({
       if (!serverTime || !ownerPlaying) return;
 
       const video = videoRef.current;
-      if (!video) return;
+      if (!video || !video.isReady()) return;
 
       // Interpolate owner's current position
       const elapsed = (Date.now() - serverTime) / 1000;

@@ -10,6 +10,7 @@ export interface VideoPlayerHandle {
   pause: () => void;
   setPlaybackRate: (rate: number) => void;
   isPaused: () => boolean;
+  isReady: () => boolean;
 }
 
 interface Props {
@@ -179,21 +180,22 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(
       getCurrentTime: () => videoRef.current?.currentTime ?? lastTimeRef.current,
       setCurrentTime: (t: number) => {
         lastSeekTime.current = t;
-        if (videoRef.current && videoRef.current.readyState >= 1) {
-          isInternalAction.current = true;
+        lastTimeRef.current = t;
+        // Block all sync effects while this external seek is pending
+        isInternalAction.current = true;
+        if (videoRef.current && videoRef.current.readyState >= 2) {
           videoRef.current.currentTime = t;
-          setTimeout(() => { isInternalAction.current = false; }, 200);
+          setTimeout(() => { isInternalAction.current = false; }, 500);
         } else {
-          // Video not ready yet (still loading), store for later
+          // Video not ready, store for later — keep isInternalAction blocked
           pendingSeekRef.current = t;
         }
-        lastTimeRef.current = t;
       },
       play: () => {
-        if (videoRef.current && videoRef.current.readyState >= 1) {
-          isInternalAction.current = true;
+        isInternalAction.current = true;
+        if (videoRef.current && videoRef.current.readyState >= 2) {
           videoRef.current.play().catch(() => {});
-          setTimeout(() => { isInternalAction.current = false; }, 200);
+          setTimeout(() => { isInternalAction.current = false; }, 500);
         } else {
           pendingPlayRef.current = true;
         }
@@ -208,6 +210,7 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(
       },
       setPlaybackRate: (r: number) => { if (videoRef.current) videoRef.current.playbackRate = r; },
       isPaused: () => videoRef.current?.paused ?? true,
+      isReady: () => !!videoRef.current && videoRef.current.readyState >= 2 && pendingSeekRef.current === null,
     }));
 
     // ====== 键盘快捷键 ======
@@ -368,34 +371,29 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(
       if (!v) return;
 
       // Apply pending seek (from sync before video was ready)
+      // Use 500ms block to prevent any sync-state from overriding this seek
+      isInternalAction.current = true;
       if (pendingSeekRef.current !== null) {
         const target = pendingSeekRef.current;
         pendingSeekRef.current = null;
-        isInternalAction.current = true;
         v.currentTime = target;
         lastTimeRef.current = target;
         lastSeekTime.current = target;
-        setTimeout(() => { isInternalAction.current = false; }, 200);
       }
-
-      // Apply pending play (from sync before video was ready)
+      // Apply pending play
       if (pendingPlayRef.current) {
         pendingPlayRef.current = false;
-        isInternalAction.current = true;
         v.play().catch(() => {});
-        setTimeout(() => { isInternalAction.current = false; }, 200);
       }
+      setTimeout(() => { isInternalAction.current = false; }, 500);
     }, []);
 
     // ====== 同步 ======
     useEffect(() => {
       const v = videoRef.current;
       if (!v || isInternalAction.current || mseLoading) return;
-      // Don't try to play/pause if video hasn't loaded yet
-      if (v.readyState < 1) {
-        if (isPlaying) pendingPlayRef.current = true;
-        return;
-      }
+      // Don't touch play/pause if video hasn't loaded or has pending seek
+      if (v.readyState < 2 || pendingSeekRef.current !== null) return;
       isInternalAction.current = true;
       if (isPlaying && v.paused) {
         v.play().catch(() => {}).finally(() => { isInternalAction.current = false; });
@@ -406,15 +404,12 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(
 
     useEffect(() => {
       if (isInternalAction.current || !videoRef.current || mseLoading) return;
-      // If video not ready, store pending seek
-      if (videoRef.current.readyState < 1) {
-        pendingSeekRef.current = currentTime;
-        return;
-      }
+      // Skip if video not ready or has pending seek
+      if (videoRef.current.readyState < 2 || pendingSeekRef.current !== null) return;
       if (Math.abs(videoRef.current.currentTime - currentTime) > 0.1) {
         isInternalAction.current = true;
         videoRef.current.currentTime = currentTime;
-        setTimeout(() => { isInternalAction.current = false; }, 200);
+        setTimeout(() => { isInternalAction.current = false; }, 500);
       }
     }, [currentTime, mseLoading]);
 
