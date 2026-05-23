@@ -3,3 +3,14 @@ dist
 uploads
 *.log
 .env
+
+# Dev test files
+test_out.txt
+node_ver*.txt
+react_check.txt
+tools_check.txt
+npm_install_root.log
+npm_config.log
+shell_check.txt
+root_install.log
+install_*.bat
