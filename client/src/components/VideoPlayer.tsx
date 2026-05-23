@@ -77,13 +77,8 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(
 
       const rawAudio = parsedVideo.rawAudioUrl || parsedVideo.audioUrl;
       const rawVideo = parsedVideo.rawUrl || parsedVideo.url;
-      const hasSourceUrl = !!parsedVideo.sourceUrl;
 
-      if (rawAudio && rawVideo && hasSourceUrl) {
-        console.log('[VideoPlayer] Bilibili DASH → 使用 yt-dlp 合并下载');
-        setMseLoading(true);
-        setVideoSrc(`${API_URL}/api/download-merged?url=${encodeURIComponent(parsedVideo.sourceUrl!)}`);
-      } else if (rawAudio && rawVideo && window.MediaSource) {
+      if (rawAudio && rawVideo && window.MediaSource) {
         const videoCodec = parsedVideo.videoCodec || 'avc1.64001f';
         const audioCodec = parsedVideo.audioCodec || 'mp4a.40.2';
         const vMime = `video/mp4; codecs="${videoCodec}"`;
@@ -122,13 +117,25 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(
               console.error('[MSE] 错误:', e);
               mseRef.current = false;
               setMseLoading(false);
-              setVideoSrc(parsedVideo.url);
+              // MSE failed, try yt-dlp merged download if sourceUrl available
+              if (parsedVideo.sourceUrl) {
+                console.log('[VideoPlayer] MSE 失败, 回退到 yt-dlp 合并下载');
+                setMseLoading(true);
+                setVideoSrc(`${API_URL}/api/download-merged?url=${encodeURIComponent(parsedVideo.sourceUrl)}`);
+              } else {
+                setVideoSrc(parsedVideo.url);
+              }
             }
           });
 
           const video = videoRef.current;
           if (video) video.src = blobUrl;
           return () => { mseRef.current = false; URL.revokeObjectURL(blobUrl); };
+        } else if (parsedVideo.sourceUrl) {
+          // Codecs not supported by MSE, fall back to yt-dlp
+          console.log('[VideoPlayer] MSE 不支持该编码, 回退到 yt-dlp');
+          setMseLoading(true);
+          setVideoSrc(`${API_URL}/api/download-merged?url=${encodeURIComponent(parsedVideo.sourceUrl)}`);
         } else {
           setVideoSrc(parsedVideo.url);
         }
