@@ -379,7 +379,7 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(
         <div className="video-player-native">
           <video
             ref={videoRef}
-            src={videoSrc}
+            src={videoSrc ?? undefined}
             onPlay={handlePlay}
             onPause={handlePause}
             onSeeked={handleSeeked}
