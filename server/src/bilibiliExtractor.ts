@@ -285,6 +285,7 @@ async function getPlayUrl(bvid: string, cid: number): Promise<{ videoUrl: string
 /**
  * Main entry: extract a playable Bilibili video URL.
  * Tries multiple strategies:
+ * 0. Call B站 API directly with bvid (avoids 412 page block)
  * 1. Parse __playinfo__ from page HTML (fastest, no API call)
  * 2. Extract bvid/cid from __INITIAL_STATE__, then call playurl API
  */
@@ -303,7 +304,43 @@ export async function extractBilibiliVideo(pageUrl: string): Promise<{ url: stri
     }
   }
 
-  // Fetch the page HTML
+  // Strategy 0: Try B站 API directly (avoids 412 page block)
+  const parsed = parseBilibiliUrl(resolvedUrl);
+  if (parsed?.bvid || parsed?.aid) {
+    try {
+      console.log('[bilibili] Trying direct API call...');
+      const bvid = parsed.bvid || '';
+
+      // First, get aid if we only have bvid
+      let aid = parsed.aid || 0;
+      if (!aid && bvid) {
+        const infoResp = await fetch(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, {
+          headers: { 'User-Agent': UA, 'Referer': 'https://www.bilibili.com/' },
+        });
+        const infoJson = await infoResp.json();
+        if (infoJson.code === 0 && infoJson.data) {
+          aid = infoJson.data.aid;
+          const page = parsed.page || 1;
+          const cid = infoJson.data.pages?.[page - 1]?.cid || infoJson.data.cid;
+          const title = infoJson.data.title || '';
+
+          if (cid && aid) {
+            console.log('[bilibili] Got info from API, aid:', aid, 'cid:', cid, 'title:', title.substring(0, 40));
+            const playResult = await getPlayUrl(bvid, cid);
+            if (playResult) {
+              return { url: playResult.videoUrl, audioUrl: playResult.audioUrl, videoCodec: playResult.videoCodec, audioCodec: playResult.audioCodec, title, sourceUrl: resolvedUrl };
+            }
+          }
+        } else {
+          console.log('[bilibili] API view error:', infoJson.code, infoJson.message);
+        }
+      }
+    } catch (e) {
+      console.log('[bilibili] Direct API failed:', (e as Error).message);
+    }
+  }
+
+  // Fetch the page HTML (may fail with 412 on Railway)
   let html = '';
   try {
     const resp = await fetch(resolvedUrl, {
@@ -314,35 +351,37 @@ export async function extractBilibiliVideo(pageUrl: string): Promise<{ url: stri
         'Cookie': 'buvid3=placeholder',
       },
     });
-    html = await resp.text();
+    if (resp.status === 412) {
+      console.log('[bilibili] Page returned 412, skipping HTML parse');
+    } else {
+      html = await resp.text();
+    }
   } catch (e) {
     console.log('[bilibili] Failed to fetch page:', (e as Error).message);
-    return null;
   }
 
   // Strategy 1: Try __playinfo__ from HTML (SSR embedded)
-  const playInfo = extractPlayInfoFromHtml(html);
-  if (playInfo) {
-    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-    const title = titleMatch?.[1]?.replace(/_哔哩哔哩.*$/, '').trim() || 'Bilibili Video';
-    console.log('[bilibili] Got URL from __playinfo__, has audio:', !!playInfo.audioUrl);
-    return { url: playInfo.videoUrl, audioUrl: playInfo.audioUrl, videoCodec: playInfo.videoCodec, audioCodec: playInfo.audioCodec, title, sourceUrl: resolvedUrl };
+  if (html) {
+    const playInfo = extractPlayInfoFromHtml(html);
+    if (playInfo) {
+      const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+      const title = titleMatch?.[1]?.replace(/_哔哩哔哩.*$/, '').trim() || 'Bilibili Video';
+      console.log('[bilibili] Got URL from __playinfo__, has audio:', !!playInfo.audioUrl);
+      return { url: playInfo.videoUrl, audioUrl: playInfo.audioUrl, videoCodec: playInfo.videoCodec, audioCodec: playInfo.audioCodec, title, sourceUrl: resolvedUrl };
+    }
+
+    // Strategy 2: Extract info from __INITIAL_STATE__ and call API
+    const info = await extractPageInfo(resolvedUrl);
+    if (info) {
+      const playResult = await getPlayUrl(info.bvid, info.cid);
+      if (playResult) {
+        return { url: playResult.videoUrl, audioUrl: playResult.audioUrl, videoCodec: playResult.videoCodec, audioCodec: playResult.audioCodec, title: info.title, sourceUrl: resolvedUrl };
+      }
+    }
   }
 
-  // Strategy 2: Extract info from __INITIAL_STATE__ and call API
-  const info = await extractPageInfo(resolvedUrl);
-  if (!info) {
-    console.log('[bilibili] Could not extract video info from page');
-    return null;
-  }
-
-  const playResult = await getPlayUrl(info.bvid, info.cid);
-  if (!playResult) {
-    console.log('[bilibili] Could not get play URL from API');
-    return null;
-  }
-
-  return { url: playResult.videoUrl, audioUrl: playResult.audioUrl, videoCodec: playResult.videoCodec, audioCodec: playResult.audioCodec, title: info.title, sourceUrl: resolvedUrl };
+  console.log('[bilibili] All extraction methods failed');
+  return null;
 }
 
 /**
