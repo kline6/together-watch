@@ -39,13 +39,20 @@ function waitUpdate(sb: SourceBuffer): Promise<void> {
 /** 流式写入 SourceBuffer */
 async function pumpToBuffer(res: Response, sb: SourceBuffer) {
   const reader = res.body!.getReader();
+  const MAX_CHUNK = 256 * 1024;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    if (sb.updating) await waitUpdate(sb);
-    const p = waitUpdate(sb);
-    sb.appendBuffer(value);
-    await p;
+    let offset = 0;
+    while (offset < value.byteLength) {
+      const end = Math.min(offset + MAX_CHUNK, value.byteLength);
+      const chunk = value.slice(offset, end);
+      if (sb.updating) await waitUpdate(sb);
+      const p = waitUpdate(sb);
+      sb.appendBuffer(chunk);
+      await p;
+      offset = end;
+    }
   }
 }
 

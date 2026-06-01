@@ -128,6 +128,11 @@ const DanmakuLayer: React.FC<Props> = ({
         (d) => d.timestamp >= currentTime && d.timestamp <= currentTime + 3 && d.type === 'public'
       );
       relevant.forEach((d) => addDanmaku(d, currentTime));
+    } else if (currentTime < lastTimeRef.current - 0.5) {
+      danmakuPool.current = [];
+      rowOccupancy.current.clear();
+      processedTimestamps.current.clear();
+      lastTimeRef.current = currentTime;
     } else {
       lastTimeRef.current = currentTime;
     }
@@ -137,6 +142,8 @@ const DanmakuLayer: React.FC<Props> = ({
   useEffect(() => {
     if (!visible) {
       danmakuPool.current = [];
+      rowOccupancy.current.clear();
+      processedTimestamps.current.clear();
       return;
     }
 

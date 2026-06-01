@@ -145,7 +145,7 @@ async function extractPageInfo(url: string): Promise<{ bvid: string; aid: number
   const aid = parsed.aid || 0;
 
   // Try to extract cid from __playinfo__ first
-  const playInfoMatch = html.match(/window\.__playinfo__\s*=\s*(\{.+?\});\s*(?:window\.|<\/script>)/s);
+  const playInfoMatch = html.match(/window\.__playinfo__\s*=\s*(\{.*?\})\s*<\/script>/s);
   if (playInfoMatch) {
     try {
       const playInfo = JSON.parse(playInfoMatch[1]);
@@ -188,7 +188,7 @@ async function extractPageInfo(url: string): Promise<{ bvid: string; aid: number
  * Returns DASH { videoUrl, audioUrl, videoCodec, audioCodec } or combined { videoUrl }.
  */
 function extractPlayInfoFromHtml(html: string): { videoUrl: string; audioUrl?: string; videoCodec?: string; audioCodec?: string } | null {
-  const match = html.match(/window\.__playinfo__\s*=\s*(\{.+?\});\s*(?:window\.|<\/script>)/s);
+  const match = html.match(/window\.__playinfo__\s*=\s*(\{.*?\})\s*<\/script>/s);
   if (!match) return null;
 
   try {

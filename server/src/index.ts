@@ -110,13 +110,27 @@ app.post('/api/upload', (req, res) => {
 
 // ---- Video streaming with Range support ----
 app.get('/api/video/:filename', (req, res) => {
-  const filePath = path.join(UPLOAD_DIR, req.params.filename);
+  const requested = path.normalize(req.params.filename);
+  if (path.isAbsolute(requested) || requested.includes('..') || requested.includes('/') || requested.includes('\\')) {
+    return res.status(400).json({ error: '无效的文件名' });
+  }
+
+  const filePath = path.join(UPLOAD_DIR, requested);
+  const resolvedPath = path.resolve(filePath);
+  if (!resolvedPath.startsWith(path.resolve(UPLOAD_DIR) + path.sep) && resolvedPath !== path.resolve(UPLOAD_DIR)) {
+    return res.status(400).json({ error: '无效的文件名' });
+  }
 
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ error: '视频文件不存在或已过期' });
   }
 
-  const stat = fs.statSync(filePath);
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(filePath);
+  } catch {
+    return res.status(404).json({ error: '视频文件不存在或已过期' });
+  }
   const fileSize = stat.size;
   const range = req.headers.range;
 
@@ -187,6 +201,12 @@ app.get('/api/proxy', async (req, res) => {
 
   try {
     const parsedUrl = new URL(targetUrl);
+
+    const forbiddenHostnames = new Set(['localhost', '127.0.0.1', '[::1]', '0.0.0.0']);
+    const hostname = parsedUrl.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    if (forbiddenHostnames.has(hostname) || hostname.startsWith('10.') || hostname.startsWith('192.168.') || /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname) || hostname.endsWith('.local') || hostname === 'metadata.google.internal') {
+      return res.status(400).json({ error: '不允许访问该地址' });
+    }
     const range = req.headers.range;
 
     // Auto-detect correct Referer based on CDN domain
@@ -531,7 +551,19 @@ app.get('/api/download-merged', async (req, res) => {
 });
 
 function serveFile(filePath: string, res: express.Response) {
-  const stat = fs.statSync(filePath);
+  if (!fs.existsSync(filePath)) {
+    if (!res.headersSent) res.status(404).json({ error: '视频文件不存在或已过期' });
+    return;
+  }
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(filePath);
+  } catch {
+    if (!res.headersSent) res.status(404).json({ error: '视频文件不存在或已过期' });
+    return;
+  }
+
   const fileSize = stat.size;
   const range = res.req.headers.range;
 
